@@ -1,23 +1,25 @@
 # Norgon's Tweaks
 
-Optimisation et diagnostic PC, honnête sur ce qui marche vraiment.
+*[Lire en français](README.fr.md)*
 
-Ce logiciel n'active ni ne désactive jamais Windows Defender, le pare-feu, Windows Update, VBS,
-l'intégrité de la mémoire ou Smart App Control. Les changements réversibles peuvent être annulés
-depuis l'application. Aucune télémétrie, aucune connexion réseau en dehors des mises à jour.
+PC optimization and diagnostics, honest about what actually works.
+
+This software never enables or disables Windows Defender, the firewall, Windows Update, VBS,
+memory integrity, or Smart App Control. Reversible changes can be undone from within the app.
+No telemetry, no network connection outside of updates.
 
 ## Installation
 
-Ouvre PowerShell et lance :
+Open PowerShell and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/norgon2/Norgon-Tweaks/main/install.ps1 | iex
 ```
 
-Ça télécharge la dernière version, installe l'app dans `%LOCALAPPDATA%\NorgonsTweaks`,
-crée un raccourci dans le menu Démarrer et une entrée de désinstallation standard.
+This downloads the latest version, installs the app to `%LOCALAPPDATA%\NorgonsTweaks`,
+creates a Start Menu shortcut, and adds a standard uninstall entry.
 
-## Désinstallation
+## Uninstallation
 
-Depuis **Paramètres → Applications**, cherche "Norgon's Tweaks", ou lance
+From **Settings → Apps**, search for "Norgon's Tweaks", or run
 `%LOCALAPPDATA%\NorgonsTweaks\uninstall.ps1`.
