@@ -76,12 +76,6 @@ $btnLaunch = $window.FindName("BtnLaunch")
 
 $txtPath.Text = $defaultInstallDir
 
-function Set-Status([string]$text, [int]$percent) {
-    $statusText.Text = $text
-    $progress.Value = $percent
-    $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
-}
-
 $btnBrowse.Add_Click({
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = "Choisir le dossier d'installation"
@@ -90,16 +84,20 @@ $btnBrowse.Add_Click({
     }
 })
 
-$btnInstall.Add_Click({
-    $btnInstall.IsEnabled = $false
-    $txtPath.IsEnabled = $false
-    $btnBrowse.IsEnabled = $false
-    $chkDesktop.IsEnabled = $false
-    $radioEn.IsEnabled = $false; $radioMixed.IsEnabled = $false; $radioFr.IsEnabled = $false
+# Le telechargement/l'ecriture disque tournent dans un runspace separe pour ne jamais geler la
+# fenetre ("Not Responding" pendant l'appel reseau) : chaque mise a jour d'UI est marshalee sur le
+# thread de la fenetre via Dispatcher.Invoke, jamais touchee directement depuis ce thread.
+$installWork = {
+    param($window, $statusText, $progress, $btnInstall, $btnLaunch, $txtPath, $btnBrowse, $chkDesktop, $radioEn, $radioMixed, $radioFr, $repo, $exeName, $installDir, $language, $createDesktop)
 
-    $installDir = $txtPath.Text
+    function Set-Status([string]$text, [int]$percent) {
+        $window.Dispatcher.Invoke([action]{
+            $statusText.Text = $text
+            $progress.Value = $percent
+        })
+    }
+
     $exePath = Join-Path $installDir $exeName
-    $language = if ($radioEn.IsChecked) { "en" } elseif ($radioFr.IsChecked) { "fr" } else { "mixed" }
 
     try {
         Set-Status "Recherche de la derniere version..." 10
@@ -127,7 +125,7 @@ $btnInstall.Add_Click({
         $shortcut.IconLocation = "$exePath,0"
         $shortcut.Save()
 
-        if ($chkDesktop.IsChecked) {
+        if ($createDesktop) {
             Set-Status "Creation du raccourci Bureau..." 78
             $desktopPath = [Environment]::GetFolderPath("Desktop")
             $deskShortcut = $shell.CreateShortcut((Join-Path $desktopPath "Norgon's Tweaks.lnk"))
@@ -160,22 +158,48 @@ Write-Host "Norgon's Tweaks a ete desinstalle."
         Set-Content -Path (Join-Path $installDir "uninstall.ps1") -Value $uninstallScript -Encoding UTF8
 
         Set-Status "Installation terminee dans $installDir" 100
-        $btnInstall.Visibility = [System.Windows.Visibility]::Collapsed
-        $btnLaunch.Visibility = [System.Windows.Visibility]::Visible
-        $script:finalExePath = $exePath
+        $window.Dispatcher.Invoke([action]{
+            $btnInstall.Visibility = [System.Windows.Visibility]::Collapsed
+            $btnLaunch.Visibility = [System.Windows.Visibility]::Visible
+            $btnLaunch.Tag = $exePath
+        })
     }
     catch {
-        Set-Status "Erreur : $($_.Exception.Message)" 0
-        $btnInstall.IsEnabled = $true
-        $txtPath.IsEnabled = $true
-        $btnBrowse.IsEnabled = $true
-        $chkDesktop.IsEnabled = $true
-        $radioEn.IsEnabled = $true; $radioMixed.IsEnabled = $true; $radioFr.IsEnabled = $true
+        $errorMessage = $_.Exception.Message
+        Set-Status "Erreur : $errorMessage" 0
+        $window.Dispatcher.Invoke([action]{
+            $btnInstall.IsEnabled = $true
+            $txtPath.IsEnabled = $true
+            $btnBrowse.IsEnabled = $true
+            $chkDesktop.IsEnabled = $true
+            $radioEn.IsEnabled = $true; $radioMixed.IsEnabled = $true; $radioFr.IsEnabled = $true
+        })
     }
+}
+
+$btnInstall.Add_Click({
+    $btnInstall.IsEnabled = $false
+    $txtPath.IsEnabled = $false
+    $btnBrowse.IsEnabled = $false
+    $chkDesktop.IsEnabled = $false
+    $radioEn.IsEnabled = $false; $radioMixed.IsEnabled = $false; $radioFr.IsEnabled = $false
+
+    $installDir = $txtPath.Text
+    $language = if ($radioEn.IsChecked) { "en" } elseif ($radioFr.IsChecked) { "fr" } else { "mixed" }
+    $createDesktop = [bool]$chkDesktop.IsChecked
+
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = "STA"
+    $rs.ThreadOptions = "ReuseThread"
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript($installWork).AddArgument($window).AddArgument($statusText).AddArgument($progress).AddArgument($btnInstall).AddArgument($btnLaunch).AddArgument($txtPath).AddArgument($btnBrowse).AddArgument($chkDesktop).AddArgument($radioEn).AddArgument($radioMixed).AddArgument($radioFr).AddArgument($repo).AddArgument($exeName).AddArgument($installDir).AddArgument($language).AddArgument($createDesktop)
+    $ps.BeginInvoke() | Out-Null
 })
 
 $btnLaunch.Add_Click({
-    Start-Process -FilePath $script:finalExePath
+    Start-Process -FilePath $btnLaunch.Tag
     $window.Close()
 })
 
