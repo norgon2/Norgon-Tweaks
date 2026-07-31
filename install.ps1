@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
 $repo = "norgon2/Norgon-Tweaks"
-$exeName = "SafeBoostOptimizer.exe"
+$exeName = "NorgonsTweaks.exe"
 $defaultInstallDir = Join-Path $env:LOCALAPPDATA "NorgonsTweaks"
 
 [xml]$xaml = @'
