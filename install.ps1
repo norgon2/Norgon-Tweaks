@@ -60,6 +60,16 @@ $defaultInstallDir = Join-Path $env:LOCALAPPDATA "NorgonsTweaks"
 </Window>
 '@
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class NorgonConsole {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@
+[NorgonConsole]::ShowWindow([NorgonConsole]::GetConsoleWindow(), 0) | Out-Null # SW_HIDE : pas de terminal visible derriere l'assistant, comme un vrai installeur
+
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
@@ -89,6 +99,10 @@ $btnBrowse.Add_Click({
 # thread de la fenetre via Dispatcher.Invoke, jamais touchee directement depuis ce thread.
 $installWork = {
     param($window, $statusText, $progress, $btnInstall, $btnLaunch, $txtPath, $btnBrowse, $chkDesktop, $radioEn, $radioMixed, $radioFr, $repo, $exeName, $installDir, $language, $createDesktop)
+
+    # Sinon PowerShell affiche sa propre banniere de progression par-dessus notre fenetre pendant
+    # Invoke-WebRequest/Invoke-RestMethod, ce qui donne l'impression que l'installeur a plante.
+    $ProgressPreference = "SilentlyContinue"
 
     function Set-Status([string]$text, [int]$percent) {
         $window.Dispatcher.Invoke([action]{
@@ -140,7 +154,7 @@ $installWork = {
         New-Item -Path $uninstallKey -Force | Out-Null
         Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "Norgon's Tweaks"
         Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $release.tag_name
-        Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Norgon"
+        Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Norgon's Tweaks"
         Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installDir
         Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value "$exePath,0"
         Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$installDir\uninstall.ps1`""
