@@ -1,54 +1,182 @@
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
 $repo = "norgon2/Norgon-Tweaks"
-$installDir = Join-Path $env:LOCALAPPDATA "NorgonsTweaks"
 $exeName = "SafeBoostOptimizer.exe"
-$exePath = Join-Path $installDir $exeName
+$defaultInstallDir = Join-Path $env:LOCALAPPDATA "NorgonsTweaks"
 
-Write-Host "=== Norgon's Tweaks — Installateur ===" -ForegroundColor Cyan
+[xml]$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Norgon's Tweaks — Installation" Height="460" Width="480"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Background="#0A0D12" FontFamily="Segoe UI">
+    <Grid Margin="30,25,30,25">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-Write-Host "Recherche de la derniere version..."
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "NorgonsTweaks-Installer" }
-$asset = $release.assets | Where-Object { $_.name -eq $exeName } | Select-Object -First 1
-if (-not $asset) { throw "Aucun asset '$exeName' trouve dans la derniere release." }
+        <TextBlock Grid.Row="0" Text="Norgon's Tweaks" Foreground="White" FontSize="26" FontWeight="Bold"/>
+        <TextBlock Grid.Row="1" Text="Assistant d'installation" Foreground="#7B8498" FontSize="13" Margin="0,2,0,15"/>
 
-Write-Host "Version trouvee : $($release.tag_name)"
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        <StackPanel Grid.Row="2" Margin="0,0,0,15">
+            <TextBlock Text="Dossier d'installation" Foreground="#7B8498" FontSize="11" Margin="0,0,0,6"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="TxtPath" Grid.Column="0" Background="#14171E" Foreground="White" BorderBrush="#252A36" BorderThickness="1" Padding="8" FontSize="12"/>
+                <Button x:Name="BtnBrowse" Grid.Column="2" Content="Parcourir..." Width="90" Background="#1A1F26" Foreground="White" BorderBrush="#252A36"/>
+            </Grid>
+        </StackPanel>
 
-Write-Host "Telechargement..."
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $exePath -UseBasicParsing
+        <CheckBox x:Name="ChkDesktop" Grid.Row="3" Content="Créer un raccourci sur le Bureau" Foreground="White" FontSize="12" Margin="0,0,0,15"/>
 
-Write-Host "Creation du raccourci Menu Demarrer..."
-$startMenu = [Environment]::GetFolderPath("StartMenu")
-$shortcutPath = Join-Path $startMenu "Programs\Norgon's Tweaks.lnk"
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $exePath
-$shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = "$exePath,0"
-$shortcut.Save()
+        <StackPanel Grid.Row="4" Margin="0,0,0,15">
+            <TextBlock Text="Langue" Foreground="#7B8498" FontSize="11" Margin="0,0,0,6"/>
+            <RadioButton x:Name="RadioEn" Content="English" Foreground="White" FontSize="12" Margin="0,0,0,4" GroupName="Lang"/>
+            <RadioButton x:Name="RadioMixed" Content="Mixte (français + termes anglais)" Foreground="White" FontSize="12" Margin="0,0,0,4" GroupName="Lang" IsChecked="True"/>
+            <RadioButton x:Name="RadioFr" Content="Français" Foreground="White" FontSize="12" GroupName="Lang"/>
+        </StackPanel>
 
-Write-Host "Ecriture de l'entree de desinstallation..."
-$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NorgonsTweaks"
-New-Item -Path $uninstallKey -Force | Out-Null
-Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "Norgon's Tweaks"
-Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $release.tag_name
-Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Norgon"
-Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installDir
-Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value "$exePath,0"
-Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$installDir\uninstall.ps1`""
-Set-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -Type DWord
-Set-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -Type DWord
+        <TextBlock x:Name="StatusText" Grid.Row="5" Text="" Foreground="#7B8498" FontSize="12" VerticalAlignment="Bottom"/>
 
-$uninstallScript = @"
+        <ProgressBar x:Name="Progress" Grid.Row="6" Height="6" Margin="0,10,0,15" Background="#14171E" Foreground="#00B4DB" BorderThickness="0" Minimum="0" Maximum="100"/>
+
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="BtnInstall" Content="Installer" Width="120" Height="36" Background="#3B82F6" Foreground="White" BorderThickness="0" FontWeight="Bold"/>
+            <Button x:Name="BtnLaunch" Content="Lancer" Width="120" Height="36" Background="#3B82F6" Foreground="White" BorderThickness="0" FontWeight="Bold" Visibility="Collapsed" Margin="10,0,0,0"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+$reader = New-Object System.Xml.XmlNodeReader $xaml
+$window = [Windows.Markup.XamlReader]::Load($reader)
+
+$txtPath = $window.FindName("TxtPath")
+$btnBrowse = $window.FindName("BtnBrowse")
+$chkDesktop = $window.FindName("ChkDesktop")
+$radioEn = $window.FindName("RadioEn")
+$radioMixed = $window.FindName("RadioMixed")
+$radioFr = $window.FindName("RadioFr")
+$statusText = $window.FindName("StatusText")
+$progress = $window.FindName("Progress")
+$btnInstall = $window.FindName("BtnInstall")
+$btnLaunch = $window.FindName("BtnLaunch")
+
+$txtPath.Text = $defaultInstallDir
+
+function Set-Status([string]$text, [int]$percent) {
+    $statusText.Text = $text
+    $progress.Value = $percent
+    $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+}
+
+$btnBrowse.Add_Click({
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = "Choisir le dossier d'installation"
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $txtPath.Text = Join-Path $dialog.SelectedPath "NorgonsTweaks"
+    }
+})
+
+$btnInstall.Add_Click({
+    $btnInstall.IsEnabled = $false
+    $txtPath.IsEnabled = $false
+    $btnBrowse.IsEnabled = $false
+    $chkDesktop.IsEnabled = $false
+    $radioEn.IsEnabled = $false; $radioMixed.IsEnabled = $false; $radioFr.IsEnabled = $false
+
+    $installDir = $txtPath.Text
+    $exePath = Join-Path $installDir $exeName
+    $language = if ($radioEn.IsChecked) { "en" } elseif ($radioFr.IsChecked) { "fr" } else { "mixed" }
+
+    try {
+        Set-Status "Recherche de la derniere version..." 10
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "NorgonsTweaks-Installer" }
+        $asset = $release.assets | Where-Object { $_.name -eq $exeName } | Select-Object -First 1
+        if (-not $asset) { throw "Aucun asset '$exeName' trouve dans la derniere release." }
+
+        Set-Status "Creation du dossier d'installation..." 20
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+        Set-Status "Telechargement de $($release.tag_name)..." 35
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $exePath -UseBasicParsing
+
+        Set-Status "Ecriture des preferences..." 60
+        $settings = @{ language = $language } | ConvertTo-Json
+        Set-Content -Path (Join-Path $installDir "settings.json") -Value $settings -Encoding UTF8
+
+        Set-Status "Creation du raccourci Menu Demarrer..." 70
+        $shell = New-Object -ComObject WScript.Shell
+        $startMenu = [Environment]::GetFolderPath("StartMenu")
+        $startShortcutPath = Join-Path $startMenu "Programs\Norgon's Tweaks.lnk"
+        $shortcut = $shell.CreateShortcut($startShortcutPath)
+        $shortcut.TargetPath = $exePath
+        $shortcut.WorkingDirectory = $installDir
+        $shortcut.IconLocation = "$exePath,0"
+        $shortcut.Save()
+
+        if ($chkDesktop.IsChecked) {
+            Set-Status "Creation du raccourci Bureau..." 78
+            $desktopPath = [Environment]::GetFolderPath("Desktop")
+            $deskShortcut = $shell.CreateShortcut((Join-Path $desktopPath "Norgon's Tweaks.lnk"))
+            $deskShortcut.TargetPath = $exePath
+            $deskShortcut.WorkingDirectory = $installDir
+            $deskShortcut.IconLocation = "$exePath,0"
+            $deskShortcut.Save()
+        }
+
+        Set-Status "Ecriture de l'entree de desinstallation..." 88
+        $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NorgonsTweaks"
+        New-Item -Path $uninstallKey -Force | Out-Null
+        Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "Norgon's Tweaks"
+        Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $release.tag_name
+        Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Norgon"
+        Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installDir
+        Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value "$exePath,0"
+        Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$installDir\uninstall.ps1`""
+        Set-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -Type DWord
+        Set-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -Type DWord
+
+        $uninstallScript = @"
 `$installDir = "$installDir"
 Remove-Item -Path "`$installDir" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$shortcutPath" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$startShortcutPath" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$(Join-Path ([Environment]::GetFolderPath('Desktop')) "Norgon's Tweaks.lnk")" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$uninstallKey" -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Norgon's Tweaks a ete desinstalle."
 "@
-Set-Content -Path (Join-Path $installDir "uninstall.ps1") -Value $uninstallScript -Encoding UTF8
+        Set-Content -Path (Join-Path $installDir "uninstall.ps1") -Value $uninstallScript -Encoding UTF8
 
-Write-Host "Installation terminee dans $installDir" -ForegroundColor Green
-Write-Host "Lancement..."
-Start-Process -FilePath $exePath
+        Set-Status "Installation terminee dans $installDir" 100
+        $btnInstall.Visibility = [System.Windows.Visibility]::Collapsed
+        $btnLaunch.Visibility = [System.Windows.Visibility]::Visible
+        $script:finalExePath = $exePath
+    }
+    catch {
+        Set-Status "Erreur : $($_.Exception.Message)" 0
+        $btnInstall.IsEnabled = $true
+        $txtPath.IsEnabled = $true
+        $btnBrowse.IsEnabled = $true
+        $chkDesktop.IsEnabled = $true
+        $radioEn.IsEnabled = $true; $radioMixed.IsEnabled = $true; $radioFr.IsEnabled = $true
+    }
+})
+
+$btnLaunch.Add_Click({
+    Start-Process -FilePath $script:finalExePath
+    $window.Close()
+})
+
+$window.ShowDialog() | Out-Null
